@@ -1,0 +1,164 @@
+\documentclass{article}
+
+%% setup below are from knitr-minimal.Rnw file
+\usepackage[sc]{mathpazo}
+\usepackage[T1]{fontenc}
+\usepackage{geometry}
+\geometry{verbose,tmargin=2.5cm,bmargin=2.5cm,lmargin=2.5cm,rmargin=2.5cm}
+\setcounter{secnumdepth}{2}
+\setcounter{tocdepth}{2}
+\usepackage[unicode=true,pdfusetitle,
+ bookmarks=true,bookmarksnumbered=true,bookmarksopen=true,bookmarksopenlevel=2,
+ breaklinks=false,pdfborder={0 0 1},backref=false,colorlinks=false]
+ {hyperref}
+\hypersetup{
+ pdfstartview={XYZ null null 1}}
+%% end knitr-minimal setup
+
+%\VignetteIndexEntry{SDCD Genes}
+
+\title{Differential Gene Expression Analysis of LGRC Data}
+\author{J Fah Sathirapongsasuti}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+
+Chronic Obstructive Pulmonary Disease (COPD) is the third leading cause of death in the United States. Since the year 2000 the number of females dying from COPD has surpassed the number of males, and there is an increasing body of research suggesting females may be biologically more susceptible to COPD. The goal of the study is to explore which molecular pathways might be associated with sexual dimorphism in COPD. This vignette uses gene expression data from the Lung Genomics Research Consortium to identify 959 genes with sexually-dimorphic differential expression in the presence of COPD ("sexually dimorphic and COPD differential" or "SDCD" genes).
+
+\section{Preprocessing}
+
+Load the necessary packages and datasets.
+
+<<>>=
+library(COPDSexualDimorphism)
+`%+%` <- function(x,y) paste(x,y,sep="")
+
+p.cutoff = 0.01
+
+data(lgrc.expr)
+data(lgrc.expr.meta)
+data(lgrc.genes)
+@
+
+\section{Sexually Dimorphic and COPD Differential Gene Expression Analysis}
+
+Sexually Dimorphic and COPD Differential (SDCD) analysis comprises of two stratifications: by sex and by COPD status. These tratified analysese are multivariate linear model performed by \texttt{limma}. In each of the analyses, the function \texttt{sdcd} contrasts the linear models from the two trata and outputs a list of genes with SDCD expression. The results from the two stratification analyses are combined at the end.
+
+\subsection{Model 1: expression = COPD + Age + pkyrs}
+
+Stratified by sex, then compare the betas.
+
+<<>>=
+design.mtx = cbind(ctrl=1,
+		copd=as.integer(grepl("COPD",colnames(expr))),
+		age=expr.meta$age,
+		pkyr=expr.meta$pkyrs)
+
+good.idx = apply(design.mtx,1,function(x){!any(is.na(x))}) & (expr.meta$gender == "1-Male")
+male.fit = lmFit(log(expr)[,good.idx], design.mtx[good.idx,])
+male.fit = eBayes(male.fit)
+
+good.idx = apply(design.mtx,1,function(x){!any(is.na(x))}) & (expr.meta$gender == "2-Female")
+female.fit = lmFit(log(expr)[,good.idx], design.mtx[good.idx,])
+female.fit = eBayes(female.fit)
+
+male.female.copd.beta.diff.genes = sdcd(male.fit, female.fit, "copd", lgrc.genes, fdr.cutoff=0.25, file.prefix="male.female.copd", write.file=FALSE)
+@
+
+\subsection{Model 2: expression = Gender + Age + pkyrs}
+
+Male vs female analysis for COPD cases only.
+
+<<>>=
+design.mtx = cbind(ctrl=1,
+		gender=expr.meta$gender,
+		age=expr.meta$age,
+		pkyr=expr.meta$pkyrs)
+
+good.idx = apply(design.mtx,1,function(x){!any(is.na(x))}) & grepl("COPD",colnames(expr))
+copd.fit = lmFit(log(expr)[,good.idx], design.mtx[good.idx,])
+copd.fit = eBayes(copd.fit)
+
+good.idx = apply(design.mtx,1,function(x){!any(is.na(x))}) & grepl("CTRL",colnames(expr))
+ctrl.fit = lmFit(log(expr)[,good.idx], design.mtx[good.idx,])
+ctrl.fit = eBayes(ctrl.fit)
+
+copd.ctrl.gender.beta.diff.genes = sdcd(copd.fit, ctrl.fit, "gender", lgrc.genes, fdr.cutoff=0.25, file.prefix="copd.ctrl.gender", class.names=c("copd","ctrl"), write.file=FALSE)
+@
+
+\section{Combine the Results}
+
+We use set intersection to combine the results from the two stratification analyses.
+
+<<>>=
+male.female.copd.beta.diff.genes.all = sdcd(male.fit, female.fit, "copd", lgrc.genes, fdr.cutoff=10, file.prefix="male.female.copd", write.file=FALSE)
+copd.ctrl.gender.beta.diff.genes.all = sdcd(copd.fit, ctrl.fit, "gender", lgrc.genes, fdr.cutoff=10, file.prefix="copd.ctrl.gender", class.names=c("copd","ctrl"), write.file=FALSE)
+all.beta.diff.genes = cbind(copd.ctrl.gender.beta.diff.genes.all, male.female.copd.beta.diff.genes.all)
+rename.col = grep("beta.diff", names(all.beta.diff.genes))
+names(all.beta.diff.genes)[rename.col[1:2]] = names(all.beta.diff.genes)[rename.col[1:2]] %+% ".copd.ctrl"
+names(all.beta.diff.genes)[rename.col[3:4]] = names(all.beta.diff.genes)[rename.col[3:4]] %+% ".male.female"
+@
+
+<<eval=FALSE>>=
+sdcd.genes = merge(copd.ctrl.gender.beta.diff.genes, male.female.copd.beta.diff.genes, by=setdiff(intersect(names(copd.ctrl.gender.beta.diff.genes), names(male.female.copd.beta.diff.genes)),c("beta.diff","beta.diff.pooled.sd")))
+sdcd.genes = unique(sdcd.genes)
+@
+
+<<>>=
+data(lgrc.sdcd.genes)
+print("There are " %+% nrow(sdcd.genes) %+% " SDCD genes")
+@
+
+Then we can plot the results:
+
+<<fig=TRUE>>=
+# FIGURE 1B
+my.smart.plot(male.fit$coefficients[,"copd"], female.fit$coefficients[,"copd"], main="Coefficients of differential gene expression in males and females", xlab=expression(alpha['male']), ylab=expression(alpha['female']), colSet="Greys")
+my.smart.plot(male.fit$coefficients[male.female.copd.beta.diff.genes$ensembl_gene_id,"copd"], female.fit$coefficients[male.female.copd.beta.diff.genes$ensembl_gene_id,"copd"], colSet="Blues", type="points")
+my.smart.plot(male.fit$coefficients[copd.ctrl.gender.beta.diff.genes$ensembl_gene_id,"copd"], female.fit$coefficients[copd.ctrl.gender.beta.diff.genes$ensembl_gene_id,"copd"], colSet="Reds", type="points")
+my.smart.plot(male.fit$coefficients[sdcd.genes$ensembl_gene_id,"copd"], female.fit$coefficients[sdcd.genes$ensembl_gene_id,"copd"], colSet="Purples", type="points")
+abline(0,1,lty=2,col="gray")
+abline(h=c(qnorm(0.025),qnorm(0.975)),v=c(qnorm(0.025),qnorm(0.975)),lty=3,col="gray")
+smartlegend("right","bottom",c("stratified by gender","stratified by case-control status","both (SDCD)"),pch=20,col=c("blue","red","purple"))
+@
+
+<<fig=TRUE>>=
+# FIGURE 1C
+all.beta.diff.genes$copd.ctrl.beta.diff = all.beta.diff.genes$copd.beta - all.beta.diff.genes$ctrl.beta
+this.pch = 20
+my.smart.plot(all.beta.diff.genes$copd.ctrl.beta.diff, -log10(all.beta.diff.genes$copd.ctrl.p), main="Volcano plot for COPO-control differential expression", xlab=expression(beta['COPD'] - beta['control']), ylab=expression(-log(p['COPD,control'])), colSet="Greys", pch=this.pch)
+my.smart.plot(all.beta.diff.genes[sdcd.genes$ensembl_gene_id,"copd.ctrl.beta.diff"], -log10(all.beta.diff.genes[sdcd.genes$ensembl_gene_id,"copd.ctrl.p"]), colSet="Purples", type="points", pch=this.pch)
+smartlegend("right","top",c("SDCD Genes"),pch=this.pch,col=c("purple"))
+CIpercent = 0.9
+abline(v=quantile(all.beta.diff.genes$beta.diff.copd.ctrl, c((1-CIpercent)/2, (1+CIpercent)/2)), col="red", lty=2, lwd=1)
+
+extreme.betas.idx = abs(sdcd.genes$beta.diff.x) > 0.25 | (abs(sdcd.genes$beta.diff.x) > 0.2 & sdcd.genes$copd.ctrl.p < 1e-5)
+extreme.betas = cbind(sdcd.genes[extreme.betas.idx, c("hgnc_symbol","beta.diff.x","copd.ctrl.p","male.female.p.adj","copd.ctrl.p.adj","chromosome_name")], 
+n.log.p=-log10(sdcd.genes[extreme.betas.idx, c("copd.ctrl.p")]))
+print("Extreme beta_diff points are: ")
+print(extreme.betas)
+text(extreme.betas$beta.diff.x, extreme.betas$n.log.p, extreme.betas$hgnc_symbol, pos=1, cex=0.8)
+@
+
+<<fig=TRUE, eval=FALSE>>=
+# Figure S2
+all.beta.diff.genes$male.female.beta.diff = all.beta.diff.genes$male.beta - all.beta.diff.genes$female.beta
+this.pch = 20
+my.smart.plot(all.beta.diff.genes$male.female.beta.diff, -log10(all.beta.diff.genes$male.female.p), main="Volcano plot for male-female differential expression", xlab=expression(alpha['male'] - alpha['female']), ylab=expression(-log(p['male,female'])), colSet="Greys", pch=this.pch)
+my.smart.plot(all.beta.diff.genes[sdcd.genes$ensembl_gene_id,"male.female.beta.diff"], -log10(all.beta.diff.genes[sdcd.genes$ensembl_gene_id,"male.female.p"]), colSet="Purples", type="points", pch=this.pch)
+smartlegend("right","top",c("SDCD Genes"),pch=this.pch,col=c("purple"))
+CIpercent = 0.9
+abline(v=quantile(all.beta.diff.genes$beta.diff.male.female, c((1-CIpercent)/2, (1+CIpercent)/2)), col="red", lty=2, lwd=1)
+@
+
+\section{Session Information}
+
+<<>>=
+sessionInfo()
+@
+
+\end{document}
+

@@ -1,0 +1,22 @@
+Package: COPDSexualDimorphism
+Type: Package
+Title: Sexual dimorphic and COPD differential analysis for gene
+        expression and methylation.
+Version: 0.99.3
+Date: 2013-10-14
+Author: J Fah Sathirapongsasuti
+Maintainer: J Fah Sathirapongsasuti <fah@cs.stanford.edu>
+Description: Sexual dimoprhic and COPD differential (SDCD) analysis
+        contrasts regression coefficients from two stratified analysis.
+        Stratification can be done in two ways: by COPD status or by
+        sex. For COPD-stratified analysis, SDCD analysis contrasts
+        sexual dimorphism between cases and controls, while
+        sex-stratified SDCD analsysis contrasts COPD differential
+        expression pattern between males and females. The package is
+        meant to be used in conjunction with the package limma.
+License: LGPL-2.1
+LazyLoad: yes
+Depends: COPDSexualDimorphism.data, NCBI2R, RColorBrewer, beeswarm,
+        limma, GenomicRanges, gplots
+biocViews: Software, AssayDomain, Microarray, GeneExpression,
+        DNAMethylation, DifferentialExpression

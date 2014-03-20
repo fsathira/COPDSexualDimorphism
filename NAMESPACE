@@ -1,0 +1,7 @@
+import(beeswarm)
+import(GenomicRanges)
+export(sdcd)
+export(sdcd.core)
+export(sdcd.vmr)
+export(do.sdcd.boxplot)
+export(my.smart.plot)
