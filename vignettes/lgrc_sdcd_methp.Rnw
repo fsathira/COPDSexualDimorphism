@@ -1,0 +1,145 @@
+\documentclass{article}
+
+%% setup below are from knitr-minimal.Rnw file
+\usepackage[sc]{mathpazo}
+\usepackage[T1]{fontenc}
+\usepackage{geometry}
+\geometry{verbose,tmargin=2.5cm,bmargin=2.5cm,lmargin=2.5cm,rmargin=2.5cm}
+\setcounter{secnumdepth}{2}
+\setcounter{tocdepth}{2}
+\usepackage[unicode=true,pdfusetitle,
+ bookmarks=true,bookmarksnumbered=true,bookmarksopen=true,bookmarksopenlevel=2,
+ breaklinks=false,pdfborder={0 0 1},backref=false,colorlinks=false]
+ {hyperref}
+\hypersetup{
+ pdfstartview={XYZ null null 1}}
+%% end knitr-minimal setup
+
+%\VignetteIndexEntry{SDCD Methylation}
+
+\usepackage{graphics}
+
+\title{Differential Methylation Analysis of LGRC Data}
+\author{J. Fah Sathirapongsasuti}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+
+In the vignette \texttt{lgrc\_sdcd\_expression} we identify 959 genes with sexually-dimorphic differential expression in the presence of COPD ("sexually dimorphic and COPD differential" or "SDCD" genes). Here we focus on methylated regions in the promoter regions of SDCD genes. Using methylation profile also from Lung Genomic Research Consortium (LGRC), we identify regions with sexually dimorphic differential methylation.
+
+\section{Preprocessing}
+
+We load in all the necessary packages and format the data. 
+
+<<>>=
+library(COPDSexualDimorphism)
+`%+%` <- function(x,y) paste(x,y,sep="")
+
+p.cutoff = 0.01
+
+data(lgrc.methp)
+data(lgrc.meta)
+data(lgrc.sdcd.genes)
+
+sampleID = names(methp)[grepl("^LT",names(methp),perl=TRUE) & (names(methp) %in% meta$tissueid)]
+only.methp = as.matrix(methp[,sampleID])
+row.names(only.methp) = methp$name
+colnames(only.methp) = sampleID
+@
+
+\section{VMR for SDCD genes}
+
+We annotate the VMRs by linking them to genes within 10kb, using functions in the package GenomicRanges.
+
+<<>>=
+sdcd.genes = subset(sdcd.genes, chromosome_name != "HSCHR6_MHC_QBL")
+sdcd.genes.bed = GRanges(seqnames=Rle("chr" %+% sdcd.genes$chromosome_name),
+                         ranges=IRanges(start=sdcd.genes$start_position, 
+                                       end=sdcd.genes$end_position, 
+                                       names=sdcd.genes$ensembl_gene_id),
+                         strand=Rle(strand(sdcd.genes$strand)))
+
+methp = subset(methp, !(chr %in% c("chrX", "chrY")))
+methp.bed = GRanges(seqnames=Rle(methp$chr),
+                    ranges=IRanges(start=methp$start,
+                                  end=methp$end,
+                                  names=methp$name))
+
+window = 2e4
+sum(countOverlaps(sdcd.genes.bed, resize(methp.bed, window, fix="center")) != 0) # 397 SDCD genes have VMR w/in 10kb
+sum(countOverlaps(sdcd.genes.bed, resize(methp.bed, 2e6)) != 0)
+sum(countOverlaps(resize(methp.bed, window, fix="center"), sdcd.genes.bed) != 0) # 892 VMR have SDCD genes w/in 10kb
+
+sdcd.genes.vmr.bed = subsetByOverlaps(resize(methp.bed, window, fix="center"), sdcd.genes.bed)
+# 892 VMRs have SDCD genes
+
+sdcd.genes.vmr = names(sdcd.genes.vmr.bed)
+@
+
+\section{Sexually Dimorphic Differential Methylation Analysis}
+
+We first stratify the data by COPD status, fit linear models, and contrast the coefficients.
+
+<<>>=
+design = cbind(ctrl=1,
+	  	gender=as.integer(meta[sampleID,"GENDER"] == "1-Male"),
+		age=meta[sampleID,"age"],
+		pkyr=meta[sampleID,"pkyrs"])
+
+good.idx = apply(design,1,function(x){!any(is.na(x))}) & meta[sampleID,"diagmaj"] == "2-COPD/Emphysema"
+copd.fit = lmFit(logit(only.methp)[sdcd.genes.vmr,good.idx], design[good.idx,])
+copd.fit = eBayes(copd.fit)
+
+good.idx = apply(design,1,function(x){!any(is.na(x))}) & meta[sampleID,"diagmaj"] == "3-Control"
+ctrl.fit = lmFit(logit(only.methp)[sdcd.genes.vmr,good.idx], design[good.idx,])
+ctrl.fit = eBayes(ctrl.fit)
+@
+
+And here is the SDCD analysis on the methylation data. We have a specialize function \texttt{sdcd.vmr} to help annotate the results with SDCD genes.
+
+<<>>=
+copd.ctrl.gender.beta.diff.genes = sdcd.vmr(copd.fit, ctrl.fit, "gender", sdcd.genes, annotate=TRUE, annotate.with="genes", fdr.cutoff=0.05, file.prefix="copd.ctrl.gender", class.names=c("copd","ctrl"))
+
+copd.ctrl.gender.beta.diff.vmr = copd.ctrl.gender.beta.diff.genes$vmr
+@
+
+\section{Boxplots for the VMRs}
+
+We now plot the percent methylation for each of the sexually dimorphic VMRs.
+
+<<eval=FALSE>>=
+vmr.sdcd.gene = sapply(as.character(copd.ctrl.gender.beta.diff.genes$genesymbol), function(g) { 
+		this.vmr.genes = unlist(strsplit(g,","))
+		this.vmr.sdcd = this.vmr.genes[which(this.vmr.genes %in% sdcd.genes$hgnc_symbol)]
+		if (length(this.vmr.sdcd) > 1) {
+			print(g %+% " has more than one SDCD")
+			better.sdcd = as.character(sdcd.genes[sdcd.genes$hgnc_symbol %in% this.vmr.sdcd,"hgnc_symbol"][which.min(sdcd.genes[sdcd.genes$hgnc_symbol %in% this.vmr.sdcd,"copd.ctrl.p.adj"])])
+			print("Keeping " %+% better.sdcd %+% " because of copd.ctrl.p.adj")
+			this.vmr.sdcd = better.sdcd
+		}
+		if (length(this.vmr.sdcd) == 0) this.vmr.sdcd = NA
+		return(this.vmr.sdcd)
+	} )
+interesting.vmrs = copd.ctrl.gender.beta.diff.genes$vmr[vmr.sdcd.gene %in% sdcd.genes$hgnc_symbol]
+interesting.vmrs.genes = vmr.sdcd.gene[vmr.sdcd.gene %in% sdcd.genes$hgnc_symbol]
+names(interesting.vmrs.genes) = interesting.vmrs
+copd.bool = meta[sampleID,"diagmaj"] == "2-COPD/Emphysema"
+male.bool = meta[sampleID,"GENDER"] == "1-Male"
+for (ivmr in interesting.vmrs) {
+	this.gene = interesting.vmrs.genes[ivmr]
+	do.sdcd.boxplot(ivmr, only.methp, copd.bool, male.bool, symbol=this.gene, filename=this.gene %+% "." %+% ivmr %+% ".pdf")
+}
+@
+
+\section{Session Information}
+
+<<>>=
+sessionInfo()
+@
+
+
+\end{document}
+

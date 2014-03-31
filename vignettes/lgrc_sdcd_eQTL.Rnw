@@ -1,0 +1,116 @@
+\documentclass{article}
+
+%% setup below are from knitr-minimal.Rnw file
+\usepackage[sc]{mathpazo}
+\usepackage[T1]{fontenc}
+\usepackage{geometry}
+\geometry{verbose,tmargin=2.5cm,bmargin=2.5cm,lmargin=2.5cm,rmargin=2.5cm}
+\setcounter{secnumdepth}{2}
+\setcounter{tocdepth}{2}
+\usepackage[unicode=true,pdfusetitle,
+ bookmarks=true,bookmarksnumbered=true,bookmarksopen=true,bookmarksopenlevel=2,
+ breaklinks=false,pdfborder={0 0 1},backref=false,colorlinks=false]
+ {hyperref}
+\hypersetup{
+ pdfstartview={XYZ null null 1}}
+%% end knitr-minimal setup
+
+%\VignetteIndexEntry{SDCD eQTL}
+
+\usepackage{graphics}
+
+\title{eQTL Analysis of SDCD Genes}
+\author{J. Fah Sathirapongsasuti}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+
+In the vignette \texttt{lgrc\_sdcd\_expression} we identify 959 genes with sexually-dimorphic differential expression in the presence of COPD ("sexually dimorphic and COPD differential" or "SDCD" genes). We used genotyping information (available from dbGaP accession number: phs000624.v1.p1) to perform eQTL analysis. Here we take the eQTL results and identify eQTLs that suggest sex-specific regulation by contrasting the coefficients from the linear models.
+
+<<>>=
+library(COPDSexualDimorphism)
+`%+%` <- function(x,y) paste(x,y,sep="")
+@
+
+\section{eQTL on PLINK}
+
+There are a number of ways to do eQTL analysis. Here we chose to use PLINK, the process of which is not described here. This vignette starts at the output of PLINK commands:
+
+\texttt{plink --bfile lgrc\_eqtl\_qc --pheno lgrc\_expr.txt --all-pheno --linear --covar lgrc\_eQTL\_covar.txt --filter-males}
+
+and 
+
+\texttt{plink --bfile lgrc\_eqtl\_qc --pheno lgrc\_expr.txt --all-pheno --linear --covar lgrc\_eQTL\_covar.txt --filter-females}
+
+Because of the expensive computational burden, we need to parallel process the eQTL fitting by splitting the gene expression profile into multiple files and submit jobs to an LSF cluster.
+
+In order to do further analysis, we selected only eQTLs that associate SNPs within 100kb up and 10kb downstream of the transcription start sites of SDCD genes and gather all of the PLINK results in one file.  The combined results is read into an R \texttt{data.frame} named \texttt{eqtl}, which can be loaded by \texttt{data(lgrc.eqtl)}.
+
+\section{Results}
+
+\subsection{Multiple hypothesis testing adjustment}
+
+We first adjust for multiple hypothesis testing by Benjamini-Hochberg FDR.
+
+<<>>=
+data(lgrc.eqtl)
+dim(eqtl)
+
+print("There are " %+% length(unique(eqtl$SNP)) %+% " cis SNPs of SDCD genes.")
+
+fdr.cutoff = 0.05
+eqtl$FDR_male = p.adjust(eqtl$P_male, "BH")
+eqtl$FDR_female = p.adjust(eqtl$P_female, "BH")
+print(sum(eqtl$FDR_male < fdr.cutoff, na.rm=T) %+% " male, " %+% sum(eqtl$FDR_female < fdr.cutoff, na.rm=T) %+% " female, " %+% sum(eqtl$FDR_male < fdr.cutoff & eqtl$FDR_female < fdr.cutoff, na.rm=T) %+% " both.")
+fisher.test(eqtl$FDR_male < fdr.cutoff, eqtl$FDR_female < fdr.cutoff)
+@
+
+Sometimes reference allele for male and female are different, leading to opposite signs of the regression coefficients.
+
+<<>>=
+discord.ref.allele = which(eqtl$A1_male != eqtl$A1_female)
+eqtl$STAT_female[discord.ref.allele] = -eqtl$STAT_female[discord.ref.allele]
+eqtl$BETA_female[discord.ref.allele] = -eqtl$BETA_female[discord.ref.allele]
+@
+
+Now we are ready to identify sexually dimorphic eQTL, using the function \texttt{sdcd.core}. 
+
+<<>>=
+# package the info as limma fit object to pass to sdcd.core
+eqtl.male = list(
+  coefficients = data.frame(copd=eqtl$BETA_male),
+  stdev.unscaled = data.frame(copd=eqtl$BETA_male/eqtl$STAT_male),
+  sigma = 1,
+  df.residual = eqtl$NMISS_male - 4, 
+  df.prior = eqtl$NMISS_male - 4
+  )
+eqtl.female = list(
+  coefficients = data.frame(copd=eqtl$BETA_female),
+  stdev.unscaled = data.frame(copd=eqtl$BETA_female/eqtl$STAT_female),
+  sigma = 1,
+  df.residual = eqtl$NMISS_female - 4, 
+  df.prior = eqtl$NMISS_female - 4
+  )
+# The SDCD analysis
+eqtl.sdcd = sdcd.core(eqtl.male, eqtl.female, "copd")
+eqtl = cbind(eqtl, eqtl.sdcd)
+
+all.eqtl = eqtl
+eqtl = subset(eqtl, beta.diff.pval.adj < fdr.cutoff & !is.na(beta.diff.pval.adj))
+
+print("Male-female difference: " %+% nrow(eqtl) %+% " eQTL are significant at level " %+% fdr.cutoff %+% ", covering " %+% length(unique(eqtl$Ensembl_Gene)) %+% " genes.")
+@
+
+Note here that in the paper by Sathirapongsasuti et al., the eQTL results were further filtered for SNPs with more than five samples with homozygous recessive alleles. We cannot demonstrate that here as the SNPs data cannot be distributed through the R package.
+
+\section{Session Information}
+
+<<>>=
+sessionInfo()
+@
+
+\end{document}
+
