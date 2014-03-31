@@ -2,8 +2,8 @@ Package: COPDSexualDimorphism
 Type: Package
 Title: Sexual dimorphic and COPD differential analysis for gene
         expression and methylation.
-Version: 0.99.3
-Date: 2013-10-14
+Version: 0.99.4
+Date: 2014-03-30
 Author: J Fah Sathirapongsasuti
 Maintainer: J Fah Sathirapongsasuti <fah@cs.stanford.edu>
 Description: Sexual dimoprhic and COPD differential (SDCD) analysis
@@ -17,6 +17,6 @@ Description: Sexual dimoprhic and COPD differential (SDCD) analysis
 License: LGPL-2.1
 LazyLoad: yes
 Depends: COPDSexualDimorphism.data, NCBI2R, RColorBrewer, beeswarm,
-        limma, GenomicRanges, gplots
+        limma, GenomicRanges, gplots, gtools
 biocViews: Software, AssayDomain, Microarray, GeneExpression,
         DNAMethylation, DifferentialExpression
